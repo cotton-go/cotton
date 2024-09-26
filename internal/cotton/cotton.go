@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/cotton-go/cotton/internal/config"
+	"github.com/cotton-go/cotton/internal/env"
+	"github.com/cotton-go/cotton/internal/single"
 	"github.com/cotton-go/cotton/runtime/codegen"
 )
 
@@ -18,14 +23,14 @@ type SingleWeavelet struct {
 	// Registrations.
 	regs       []*codegen.Registration                // registered components
 	regsByName map[string]*codegen.Registration       // registrations by component name
-	regsByIntf map[reflect.Type]*codegen.Registration // registrations by component interface type
 	regsByImpl map[reflect.Type]*codegen.Registration // registrations by component implementation type
 
 	// Options, config, and metadata.
-	opts         Options   // options
-	deploymentId string    // globally unique deployment id
-	id           string    // globally unique weavelet id
-	createdAt    time.Time // time at which the weavelet was created
+	opts         Options              // options
+	config       *single.SingleConfig // "[single]" section of config file
+	deploymentId string               // globally unique deployment id
+	id           string               // globally unique weavelet id
+	createdAt    time.Time            // time at which the weavelet was created
 
 	// Logging, tracing, and metrics.
 	// pp *logging.PrettyPrinter // pretty printer for logger
@@ -37,8 +42,49 @@ type SingleWeavelet struct {
 }
 
 func NewSingleWeavelet(ctx context.Context, regs []*codegen.Registration, opts Options) (*SingleWeavelet, error) {
+	// Parse config.
+	config, err := parseSingleConfig(regs, opts.ConfigFilename, opts.Config)
+	if err != nil {
+		return nil, err
+	}
 
-	return nil, nil
+	env, err := env.Parse(config.App.Env)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range env {
+		if err := os.Setenv(k, v); err != nil {
+			return nil, err
+		}
+	}
+
+	deploymentId := uuid.New().String()
+	id := uuid.New().String()
+	// Index registrations.
+	regsByName := map[string]*codegen.Registration{}
+	// regsByIntf := map[reflect.Type]*codegen.Registration{}
+	regsByImpl := map[reflect.Type]*codegen.Registration{}
+	for _, reg := range regs {
+		regsByName[reg.Name] = reg
+		// regsByIntf[reg.Iface] = reg
+		regsByImpl[reg.Impl] = reg
+	}
+
+	return &SingleWeavelet{
+		ctx:        ctx,
+		regs:       regs,
+		regsByName: regsByName,
+		// regsByIntf: regsByIntf,
+		id:           id,
+		deploymentId: deploymentId,
+		regsByImpl:   regsByImpl,
+		opts:         opts,
+		config:       config,
+		createdAt:    time.Now(),
+		components:   map[string]any{},
+		listeners:    map[string]net.Listener{},
+	}, nil
 }
 
 func (w *SingleWeavelet) GetImpl(t reflect.Type) (any, error) {
@@ -71,9 +117,9 @@ func (w *SingleWeavelet) get(reg *codegen.Registration) (any, error) {
 	obj := v.Interface()
 
 	// Fill config.
-	if cfg := config.Config(v); cfg != nil {
-		fmt.Println("todo: fill config")
-		// if err := runtime.ParseConfigSection(reg.Name, "", w.config.App.Sections, cfg); err != nil {
+	if cfg := config.Config(w.config.App, v); cfg != nil {
+		// slog.Info("parsing config section", "reg", reg)
+		// if err := runtime.ParseConfigSection(reg.Name, "", nil, cfg); err != nil {
 		// 	return nil, err
 		// }
 	}

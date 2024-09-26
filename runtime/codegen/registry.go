@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+
+	"github.com/cotton-go/cotton/internal/config"
+	"github.com/cotton-go/cotton/runtime"
+	"github.com/cotton-go/cotton/runtime/protos"
 )
 
 // globalRegistry is the global registry used by Register and Registered.
@@ -70,12 +74,15 @@ func (r *registry) register(reg Registration) error {
 		return fmt.Errorf("component %s already registered for type %v when registering %v",
 			reg.Name, old.Impl, reg.Impl)
 	}
+
 	if r.components == nil {
 		r.components = map[reflect.Type]*Registration{}
 	}
+
 	if r.byName == nil {
 		r.byName = map[string]*Registration{}
 	}
+
 	ptr := &reg
 	r.components[reg.Iface] = ptr
 	r.byName[reg.Name] = ptr
@@ -83,12 +90,12 @@ func (r *registry) register(reg Registration) error {
 }
 
 func verifyRegistration(reg Registration) error {
-	if reg.Iface == nil {
-		return errors.New("missing component type")
-	}
-	if reg.Iface.Kind() != reflect.Interface {
-		return errors.New("component type is not an interface")
-	}
+	// if reg.Iface == nil {
+	// 	return errors.New("missing component type")
+	// }
+	// if reg.Iface.Kind() != reflect.Interface {
+	// 	return errors.New("component type is not an interface")
+	// }
 	if reg.Impl == nil {
 		return errors.New("missing implementation type")
 	}
@@ -124,4 +131,23 @@ func (r *registry) find(path string) (*Registration, bool) {
 	defer r.m.Unlock()
 	reg, ok := r.byName[path]
 	return reg, ok
+}
+func ComponentConfigValidator(path, cfg string) error {
+	info, ok := globalRegistry.find(path)
+	if !ok {
+		// Not for a known component.
+		return nil
+	}
+	conf := &protos.AppConfig{Sections: map[string]string{path: cfg}}
+	componentConfig := config.Config(conf, reflect.New(info.Impl))
+	if componentConfig == nil {
+		return fmt.Errorf("unexpected configuration for component %v "+
+			"that does not support configuration (add a "+
+			"weaver.WithConfig[configType] embedded field to %v)",
+			info.Name, info.Iface)
+	}
+	if err := runtime.ParseConfigSection(path, "", conf.Sections, componentConfig); err != nil {
+		return fmt.Errorf("%v: bad config: %w", info.Iface, err)
+	}
+	return nil
 }

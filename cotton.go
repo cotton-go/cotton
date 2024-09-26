@@ -1,4 +1,4 @@
-package contton
+package cotton
 
 import (
 	"context"
@@ -12,6 +12,10 @@ import (
 	"github.com/cotton-go/cotton/internal/reflection"
 	"github.com/cotton-go/cotton/runtime/codegen"
 )
+
+type Main struct {
+	Implements
+}
 
 type Implements struct {
 	logger *slog.Logger
@@ -48,4 +52,25 @@ func Run[T any](ctx context.Context, app func(context.Context, *T) error) error 
 	err = app(ctx, main.(*T))
 	cancel()
 	return err
+}
+
+type WithConfig[T any] struct {
+	config T
+}
+
+// Config returns the configuration information for the component that embeds
+// this [weaver.WithConfig].
+//
+// Any fields in T that were not present in the application config file will
+// have their default values.
+//
+// Any fields in the application config file that are not present in T will be
+// flagged as an error at application startup.
+func (wc *WithConfig[T]) Config() *T {
+	return &wc.config
+}
+
+// getConfig returns the underlying config.
+func (wc *WithConfig[T]) getConfig() any {
+	return &wc.config
 }
